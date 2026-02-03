@@ -9,26 +9,35 @@ WIN_LINES = [
     (0, 4, 8), (2, 4, 6),
 ]
 
+# Returns "X" or "O" if someone won, else None.
 def check_winner(board: List[str]) -> Optional[str]:
     for a, b, c in WIN_LINES:
+        # If not first is not empty and 3 in a row
         if board[a] != "." and board[a] == board[b] == board[c]:
             return board[a]
-    return None
+    return None 
 
+# checks if there is a tie
 def is_draw(board: List[str]) -> bool:
     return "." not in board and check_winner(board) is None
 
+# Returns a list of indices that are empty, like [0, 3, 5, 8]
 def legal_moves(board: List[str]) -> List[int]:
     return [i for i, v in enumerate(board) if v == "."]
 
+
 def apply_move(board: List[str], move: int, player: str) -> List[str]:
-    nb = board[:]  # copy
+    # It copies the list first so you don’t mutate the original board.
+    # This is crucial in search algorithms (MCTS), where you simulate many alternate futures.
+    nb = board[:]
     nb[move] = player
     return nb
 
+# Flips turns.
 def other(player: str) -> str:
     return "O" if player == "X" else "X"
 
+# Prints a nice grid, but shows empty cells as their index number so humans know what to type.
 def render(board: List[str]) -> None:
     def cell(i: int) -> str:
         return str(i) if board[i] == "." else board[i]
@@ -43,19 +52,22 @@ def render(board: List[str]) -> None:
 # -----------------------------
 # MCTS
 # -----------------------------
+# MCTS builds a tree of game states. Each node is one position (board state) + whose turn it is.
 @dataclass
 class Node:
     board: Tuple[str, ...]                 # immutable for dict keys
     player_to_move: str                   # whose turn at this node
-    parent: Optional["Node"] = None
-    move_from_parent: Optional[int] = None
+    parent: Optional["Node"] = None  # points back up the tree (needed for backpropagation)
+    move_from_parent: Optional[int] = None  # the move index that was played to get here from the parent
 
     children: Dict[int, "Node"] = field(default_factory=dict)  # move -> child
-    untried_moves: List[int] = field(default_factory=list)
+    untried_moves: List[int] = field(default_factory=list)  # Moves that are legal here but haven’t been expanded into child nodes yet.
+                                                            # MCTS uses this to decide when to expand vs when to keep selecting deeper.
+    visits: int = 0   # how many simulations have passed through this node
+    total_value: float = 0.0              # sum of rewards over those simulations
+    # Estimated value:  Q = total_value / visits
 
-    visits: int = 0
-    total_value: float = 0.0              # from root player's perspective
-
+    # winner exists or draw
     def is_terminal(self) -> bool:
         b = list(self.board)
         return check_winner(b) is not None or is_draw(b)
@@ -68,6 +80,11 @@ class Node:
         explore = c * math.sqrt(math.log(self.visits) / child.visits)
         return exploit + explore
 
+# simulation
+# Starting from some state, it plays random moves until the game ends.
+# Returns:
+# "X" or "O" if someone wins
+# None if it’s a draw
 def rollout(board: List[str], player_to_move: str) -> Optional[str]:
     # random playout to terminal; return winner ('X'/'O') or None for draw
     p = player_to_move
@@ -92,10 +109,16 @@ def mcts_best_move(
     Returns the chosen move for player_to_move using MCTS.
     Value is always tracked from the *root player's* perspective.
     """
-    root_player = player_to_move
+    root_player = player_to_move # who we are choosing a move for
     root = Node(board=tuple(board), player_to_move=player_to_move)
     root.untried_moves = legal_moves(board)
+    # Every reward will be interpreted as good or bad for root_player
+    # Root node stores the current board state and whose turn it is now.
 
+    # Each iteration does one simulation and updates the tree.
+    # node walks around the tree
+    # b is a working mutable board copy that we apply moves to as we traverse
+    # p tracks whose turn in the rollout world
     for _ in range(iterations):
         node = root
         b = list(root.board)
@@ -112,10 +135,16 @@ def mcts_best_move(
                     best_move, best_child = mv, ch
             # descend
             node = best_child
-            b = apply_move(b, node.move_from_parent, other(node.player_to_move))
+            b = apply_move(b, node.move_from_parent, other(node.player_to_move))  # the move that created this node was made by the other player.
             p = node.player_to_move
 
         # 2) EXPANSION
+        # If we’re at a node that still has untried moves:
+        # pick one untried move at random
+        # apply it (for the player whose turn it is at this node)
+        # create a new child node representing the resulting state
+        # add it to the tree
+        # So the tree grows “one node at a time.”
         if (not node.is_terminal()) and node.untried_moves:
             mv = random.choice(node.untried_moves)
             node.untried_moves.remove(mv)
@@ -147,6 +176,7 @@ def mcts_best_move(
             reward = -1.0
 
         # 4) BACKPROPAGATION
+        # walks from the leaf node you ended at back up to root
         cur = node
         while cur is not None:
             cur.visits += 1
@@ -158,6 +188,8 @@ def mcts_best_move(
         # no legal moves (shouldn't happen unless terminal)
         return random.choice(legal_moves(board))
 
+    # it chooses the move whose child got the most visits.
+    # Visits is more stable: it reflects both value and confidence.
     best_mv = max(root.children.items(), key=lambda kv: kv[1].visits)[0]
     return best_mv
 
@@ -195,7 +227,7 @@ def play_one_game_mcts(human: str, iterations: int) -> str:
                     pass
                 print("Invalid move. Try again.")
             board[mv] = human
-        else:
+        else:  # AI's turn
             mv = mcts_best_move(board, turn, iterations=iterations)
             board[mv] = turn
             print(f"AI plays: {mv}")
