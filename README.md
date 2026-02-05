@@ -21,3 +21,6 @@ Simulation (random rollout)
 Backpropagation (updating statistics)
 
 This visualization helps demonstrate how MCTS balances exploration and exploitation and gradually focuses on stronger moves.
+
+<img width="1182" height="786" alt="Screenshot 2026-02-05 at 2 38 07 PM" src="https://github.com/user-attachments/assets/ff29fa59-6798-4389-9008-7d7bc5c0c1c1" />
+
